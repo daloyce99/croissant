@@ -1,0 +1,45 @@
+{
+  "name": "croissant",
+  "version": "1.0.0",
+  "description": "A minimal Tauri app for Croissant.",
+  "author": "Pablo Veiga <pveiga21@protonmail.com>",
+  "scripts": {
+    "start": "react-scripts start",
+    "dev": "react-scripts start",
+    "build": "react-scripts build && npm run appimage",
+    "tauri": "tauri dev",
+    "tauri:deb": "tauri build",
+    "appimage": "bash ./deb2appimage.sh ./target/release/bundle/deb/*.deb \"Croissant\" \"Monitor employee performance and satisfaction\" \"Utility;Office;\""
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.7.0",
+    "@tauri-apps/plugin-http": "^2.5.1",
+    "@tauri-apps/plugin-log": "^2.6.0",
+    "react": "^18.2.0",
+    "react-countdown": "^2.3.6",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^7.6.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.7.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/jest": "^29.5.14",
+    "@types/react": "^18.2.28",
+    "@types/react-dom": "^18.2.7",
+    "@types/react-router-dom": "^5.3.3",
+    "react-scripts": "^5.0.1",
+    "typescript": "^4.9.5"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

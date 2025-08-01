@@ -1,0 +1,26 @@
+System Updates:
+
+Hide the Dashboard, Performance, and Satisfaction tabs for now, since data is currently shared via Looker.
+
+Rename the Settings tab to Leader Voice.
+
+Rename Notification Email to Master Email Address.
+/ostead of providing a survey frequency option, implement fields for Time and Date.
+
+Update the login page to require Master Email Address and Access Code.
+
+The output fields from the system should be:
+[popup_text, popup_type, time, date]
+
+UI-wise this looks fine to start with. Just a couple of changes:
+
+Use colors #F2F2F2 and #FFFFFF as the color scheme.
+
+Use Nunito font throughout.
+
+The Save Settings button should have less rounded corners — about a border radius of 25 (similar to Canva’s style), more like a square with softened edges.
+
+* login api
+* insertion api
+* removal api
+* login table LiveCliets {master_email, acess_code}
