@@ -4,11 +4,62 @@ import './App.css';
 // Check if we're running in Tauri
 const isTauri = window.__TAURI__ !== undefined;
 
-// Only import invoke if we're in Tauri
-let invoke;
-if (isTauri) {
-  invoke = window.__TAURI__.core.invoke;
-}
+// Mock database for browser mode
+const mockUsers = [
+  { id: 1, name: 'Admin User', email: 'admin@croissant.dev' },
+  { id: 2, name: 'Test User', email: 'test@example.com' }
+];
+
+const mockCredentials = [
+  { master_email: 'admin@croissant.dev', access_code: 'admin123' },
+  { master_email: 'test@example.com', access_code: 'test123' }
+];
+
+// Mock invoke function for browser mode
+const mockInvoke = async (command, args = {}) => {
+  console.log(`Mock invoke: ${command}`, args);
+  
+  switch (command) {
+    case 'check_login':
+      const { email, password } = args;
+      const user = mockCredentials.find(u => u.master_email === email && u.access_code === password);
+      return !!user;
+      
+    case 'register_user':
+      const { email: regEmail, password: regPassword } = args;
+      // Check if user already exists
+      if (mockCredentials.find(u => u.master_email === regEmail)) {
+        throw new Error('User already exists');
+      }
+      mockCredentials.push({ master_email: regEmail, access_code: regPassword });
+      return true;
+      
+    case 'get_users':
+      return [...mockUsers];
+      
+    case 'add_user':
+      const { name, email: userEmail } = args;
+      const newId = Math.max(...mockUsers.map(u => u.id)) + 1;
+      const newUser = { id: newId, name, email: userEmail };
+      mockUsers.push(newUser);
+      return newUser;
+      
+    case 'delete_user':
+      const { id } = args;
+      const index = mockUsers.findIndex(u => u.id === id);
+      if (index > -1) {
+        mockUsers.splice(index, 1);
+        return true;
+      }
+      return false;
+      
+    default:
+      throw new Error(`Unknown command: ${command}`);
+  }
+};
+
+// Use real invoke if in Tauri, otherwise use mock
+const invoke = isTauri ? window.__TAURI__.core.invoke : mockInvoke;
 
 function App() {
   const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'dashboard'
@@ -18,22 +69,13 @@ function App() {
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState({ name: '', email: '' });
 
-  // Helper function to check if Tauri is available
-  const checkTauri = () => {
-    if (!isTauri) {
-      setMessage('❌ This app must be run in Tauri desktop application, not in browser');
-      return false;
-    }
-    return true;
+  // Helper function to show environment info
+  const getEnvironmentInfo = () => {
+    return isTauri ? 'Running in Tauri Desktop App' : 'Running in Browser (Mock Mode)';
   };
 
   // Test login with default admin credentials
   const testLogin = async () => {
-    if (!isTauri) {
-      setMessage('❌ This app must be run in Tauri desktop application, not in browser');
-      return;
-    }
-    
     try {
       const result = await invoke('check_login', { 
         email: 'admin@croissant.dev', 
@@ -53,8 +95,6 @@ function App() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!checkTauri()) return;
-    
     try {
       const result = await invoke('check_login', loginData);
       if (result) {
@@ -71,8 +111,6 @@ function App() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    if (!checkTauri()) return;
-    
     try {
       const result = await invoke('register_user', registerData);
       if (result) {
@@ -87,8 +125,6 @@ function App() {
   };
 
   const loadUsers = async () => {
-    if (!checkTauri()) return;
-    
     try {
       const userList = await invoke('get_users');
       setUsers(userList);
@@ -99,8 +135,6 @@ function App() {
 
   const addUser = async (e) => {
     e.preventDefault();
-    if (!checkTauri()) return;
-    
     try {
       await invoke('add_user', newUser);
       setMessage('✅ User added successfully!');
@@ -112,8 +146,6 @@ function App() {
   };
 
   const deleteUser = async (id) => {
-    if (!checkTauri()) return;
-    
     try {
       await invoke('delete_user', { id });
       setMessage('✅ User deleted successfully!');
@@ -126,18 +158,25 @@ function App() {
   if (currentView === 'login') {
     return (
       <div className="container">
-        {!isTauri && (
-          <div className="browser-warning">
-            ⚠️ This app is designed to run as a desktop application. 
-            Please close this browser tab and look for the Croissant desktop window.
-          </div>
-        )}
+        <div className={`environment-info ${isTauri ? 'tauri' : 'browser'}`}>
+          {getEnvironmentInfo()}
+          {!isTauri && ' - Using mock data for demo'}
+        </div>
         <h1>Croissant Login</h1>
         <p className="info">According to TODO: Use Master Email Address and Access Code</p>
         
         <button onClick={testLogin} className="test-btn">
           🧪 Test Login (admin@croissant.dev)
         </button>
+        
+        {!isTauri && (
+          <div className="demo-info">
+            <h4>Demo Credentials:</h4>
+            <p><strong>Admin:</strong> admin@croissant.dev / admin123</p>
+            <p><strong>Test User:</strong> test@example.com / test123</p>
+            <p><em>In browser mode, data is stored temporarily in memory</em></p>
+          </div>
+        )}
         
         <form onSubmit={handleLogin} className="auth-form">
           <input
