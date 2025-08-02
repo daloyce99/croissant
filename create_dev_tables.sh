@@ -35,15 +35,15 @@ CREATE TABLE IF NOT EXISTS dev_users (
     email VARCHAR(255) UNIQUE NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS dev_login_credentials (
+CREATE TABLE IF NOT EXISTS LiveClients (
     id SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
+    master_email VARCHAR(255) UNIQUE NOT NULL,
     access_code VARCHAR(255) NOT NULL
 );
 
-INSERT INTO dev_login_credentials (email, access_code)
+INSERT INTO LiveClients (master_email, access_code)
 VALUES ('$ADMIN_EMAIL', '$HASHED_PASSWORD')
-ON CONFLICT (email) DO NOTHING;
+ON CONFLICT (master_email) DO NOTHING;
 EOSQL
 
 unset PGPASSWORD

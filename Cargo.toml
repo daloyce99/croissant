@@ -21,7 +21,3 @@ dotenv = "0.15"
 
 [build-dependencies]
 tauri-build = { version = "2.3.1", features = [] }
-
-[lib]
-name = "app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]

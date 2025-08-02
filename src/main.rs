@@ -47,7 +47,7 @@ async fn register_user(email: String, password: String) -> Result<bool, String> 
     });
 
     client.execute(
-        "INSERT INTO dev_login_credentials (email, access_code) VALUES ($1, $2)",
+        "INSERT INTO LiveClients (master_email, access_code) VALUES ($1, $2)",
         &[&email, &hashed],
     ).await.map_err(|e| format!("Insert error: {}", e))?;
 
@@ -68,7 +68,7 @@ async fn check_login(email: String, password: String) -> Result<bool, String> {
     });
 
     let row = client.query_opt(
-        "SELECT access_code FROM dev_login_credentials WHERE email = $1",
+        "SELECT access_code FROM LiveClients WHERE master_email = $1",
         &[&email],
     ).await.map_err(|e| format!("Query error: {}", e))?;
 
