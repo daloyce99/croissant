@@ -41,6 +41,16 @@ CREATE TABLE IF NOT EXISTS LiveClients (
     access_code VARCHAR(255) NOT NULL
 );
 
+-- New table for content management as requested by Pierre-Stéphane
+CREATE TABLE IF NOT EXISTS messages (
+    id SERIAL PRIMARY KEY,
+    master_email_address VARCHAR(255) NOT NULL,
+    department TEXT NOT NULL,
+    text TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 INSERT INTO LiveClients (master_email, access_code)
 VALUES ('$ADMIN_EMAIL', '$HASHED_PASSWORD')
 ON CONFLICT (master_email) DO NOTHING;

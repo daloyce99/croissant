@@ -4,16 +4,56 @@ import './App.css';
 // Check if we're running in Tauri
 const isTauri = window.__TAURI__ !== undefined;
 
-// Mock database for browser mode
-const mockUsers = [
+// Persistent storage helpers for browser mode
+const STORAGE_KEYS = {
+  USERS: 'croissant_mock_users',
+  CREDENTIALS: 'croissant_mock_credentials',
+  MESSAGES: 'croissant_mock_messages'
+};
+
+const loadFromStorage = (key, defaultValue) => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : defaultValue;
+  }
+  return defaultValue;
+};
+
+const saveToStorage = (key, data) => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    localStorage.setItem(key, JSON.stringify(data));
+  }
+};
+
+// Mock database with persistent storage (browser mode only)
+const mockUsers = loadFromStorage(STORAGE_KEYS.USERS, [
   { id: 1, name: 'Admin User', email: 'admin@croissant.dev' },
   { id: 2, name: 'Test User', email: 'test@example.com' }
-];
+]);
 
-const mockCredentials = [
+const mockCredentials = loadFromStorage(STORAGE_KEYS.CREDENTIALS, [
   { master_email: 'admin@croissant.dev', access_code: 'admin123' },
   { master_email: 'test@example.com', access_code: 'test123' }
-];
+]);
+
+const mockMessages = loadFromStorage(STORAGE_KEYS.MESSAGES, [
+  { 
+    id: 1, 
+    master_email_address: 'admin@croissant.dev', 
+    department: 'IT', 
+    text: 'Server maintenance scheduled for tonight', 
+    content_type: 'Notification',
+    created_at: new Date().toISOString()
+  },
+  { 
+    id: 2, 
+    master_email_address: 'test@example.com', 
+    department: 'HR', 
+    text: 'New employee onboarding process', 
+    content_type: 'Information',
+    created_at: new Date(Date.now() - 86400000).toISOString()
+  }
+]);
 
 // Mock invoke function for browser mode
 const mockInvoke = async (command, args = {}) => {
@@ -22,36 +62,65 @@ const mockInvoke = async (command, args = {}) => {
   switch (command) {
     case 'check_login':
       const { email, password } = args;
-      const user = mockCredentials.find(u => u.master_email === email && u.access_code === password);
+      const loginCredentials = loadFromStorage(STORAGE_KEYS.CREDENTIALS, mockCredentials);
+      const user = loginCredentials.find(u => u.master_email === email && u.access_code === password);
       return !!user;
       
     case 'register_user':
       const { email: regEmail, password: regPassword } = args;
+      const registerCredentials = loadFromStorage(STORAGE_KEYS.CREDENTIALS, mockCredentials);
       // Check if user already exists
-      if (mockCredentials.find(u => u.master_email === regEmail)) {
+      if (registerCredentials.find(u => u.master_email === regEmail)) {
         throw new Error('User already exists');
       }
-      mockCredentials.push({ master_email: regEmail, access_code: regPassword });
+      const newCredentials = [...registerCredentials, { master_email: regEmail, access_code: regPassword }];
+      saveToStorage(STORAGE_KEYS.CREDENTIALS, newCredentials);
       return true;
       
     case 'get_users':
-      return [...mockUsers];
+      return loadFromStorage(STORAGE_KEYS.USERS, mockUsers);
       
     case 'add_user':
       const { name, email: userEmail } = args;
-      const newId = Math.max(...mockUsers.map(u => u.id)) + 1;
+      const addUsers = loadFromStorage(STORAGE_KEYS.USERS, mockUsers);
+      const newId = Math.max(...addUsers.map(u => u.id), 0) + 1;
       const newUser = { id: newId, name, email: userEmail };
-      mockUsers.push(newUser);
+      const updatedUsers = [...addUsers, newUser];
+      saveToStorage(STORAGE_KEYS.USERS, updatedUsers);
       return newUser;
       
     case 'delete_user':
       const { id } = args;
-      const index = mockUsers.findIndex(u => u.id === id);
-      if (index > -1) {
-        mockUsers.splice(index, 1);
-        return true;
-      }
-      return false;
+      const deleteUsers = loadFromStorage(STORAGE_KEYS.USERS, mockUsers);
+      const filteredUsers = deleteUsers.filter(u => u.id !== id);
+      saveToStorage(STORAGE_KEYS.USERS, filteredUsers);
+      return true;
+      
+    case 'get_messages':
+      return loadFromStorage(STORAGE_KEYS.MESSAGES, mockMessages);
+      
+    case 'add_message':
+      const { master_email_address, department, text, content_type } = args;
+      const addMessages = loadFromStorage(STORAGE_KEYS.MESSAGES, mockMessages);
+      const newMessageId = Math.max(...addMessages.map(m => m.id), 0) + 1;
+      const newMessage = { 
+        id: newMessageId, 
+        master_email_address, 
+        department, 
+        text, 
+        content_type,
+        created_at: new Date().toISOString()
+      };
+      const updatedMessages = [...addMessages, newMessage];
+      saveToStorage(STORAGE_KEYS.MESSAGES, updatedMessages);
+      return newMessage;
+      
+    case 'delete_message':
+      const { id: messageId } = args;
+      const deleteMessages = loadFromStorage(STORAGE_KEYS.MESSAGES, mockMessages);
+      const filteredMessages = deleteMessages.filter(m => m.id !== messageId);
+      saveToStorage(STORAGE_KEYS.MESSAGES, filteredMessages);
+      return true;
       
     default:
       throw new Error(`Unknown command: ${command}`);
@@ -62,12 +131,19 @@ const mockInvoke = async (command, args = {}) => {
 const invoke = isTauri ? window.__TAURI__.core.invoke : mockInvoke;
 
 function App() {
-  const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'dashboard'
+  const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'dashboard', 'messages'
   const [loginData, setLoginData] = useState({ email: '', password: '' });
   const [registerData, setRegisterData] = useState({ email: '', password: '' });
   const [message, setMessage] = useState('');
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState({ name: '', email: '' });
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState({ 
+    master_email_address: '', 
+    department: '', 
+    text: '', 
+    content_type: '' 
+  });
 
   // Helper function to show environment info
   const getEnvironmentInfo = () => {
@@ -85,6 +161,7 @@ function App() {
         setMessage('✅ Login successful with admin credentials!');
         setCurrentView('dashboard');
         loadUsers();
+        loadMessages();
       } else {
         setMessage('❌ Login failed');
       }
@@ -101,6 +178,7 @@ function App() {
         setMessage('✅ Login successful!');
         setCurrentView('dashboard');
         loadUsers();
+        loadMessages();
       } else {
         setMessage('❌ Invalid credentials');
       }
@@ -155,58 +233,114 @@ function App() {
     }
   };
 
+  // Message management functions
+  const loadMessages = async () => {
+    try {
+      const messageList = await invoke('get_messages');
+      setMessages(messageList);
+    } catch (error) {
+      setMessage(`❌ Error loading messages: ${error}`);
+    }
+  };
+
+  const addMessage = async (e) => {
+    e.preventDefault();
+    try {
+      await invoke('add_message', newMessage);
+      setMessage('✅ Message added successfully!');
+      setNewMessage({ master_email_address: '', department: '', text: '', content_type: '' });
+      loadMessages();
+    } catch (error) {
+      setMessage(`❌ Error adding message: ${error}`);
+    }
+  };
+
+  const deleteMessage = async (id) => {
+    try {
+      await invoke('delete_message', { id });
+      setMessage('✅ Message deleted successfully!');
+      loadMessages();
+    } catch (error) {
+      setMessage(`❌ Error deleting message: ${error}`);
+    }
+  };
+
+  const clearMockData = () => {
+    if (!isTauri && window.localStorage) {
+      if (window.confirm('Are you sure you want to clear all stored data? This will reset all users, credentials, and messages to default values.')) {
+        localStorage.removeItem(STORAGE_KEYS.USERS);
+        localStorage.removeItem(STORAGE_KEYS.CREDENTIALS);
+        localStorage.removeItem(STORAGE_KEYS.MESSAGES);
+        
+        // Reset to defaults and refresh
+        window.location.reload();
+      }
+    }
+  };
+
   if (currentView === 'login') {
     return (
-      <div className="container">
-        <div className={`environment-info ${isTauri ? 'tauri' : 'browser'}`}>
-          {getEnvironmentInfo()}
-          {!isTauri && ' - Using mock data for demo'}
-        </div>
-        <h1>Croissant Login</h1>
-        <p className="info">According to TODO: Use Master Email Address and Access Code</p>
-        
-        <button onClick={testLogin} className="test-btn">
-          🧪 Test Login (admin@croissant.dev)
-        </button>
-        
-        {!isTauri && (
-          <div className="demo-info">
-            <h4>Demo Credentials:</h4>
-            <p><strong>Admin:</strong> admin@croissant.dev / admin123</p>
-            <p><strong>Test User:</strong> test@example.com / test123</p>
-            <p><em>In browser mode, data is stored temporarily in memory</em></p>
+      <div className="auth-page">
+        <div className="container">
+          <div className={`environment-info ${isTauri ? 'tauri' : 'browser'}`}>
+            {getEnvironmentInfo()}
+            {!isTauri && ' - Using persistent mock data'}
           </div>
-        )}
-        
-        <form onSubmit={handleLogin} className="auth-form">
-          <input
-            type="email"
-            placeholder="Master Email Address"
-            value={loginData.email}
-            onChange={(e) => setLoginData({...loginData, email: e.target.value})}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Access Code"
-            value={loginData.password}
-            onChange={(e) => setLoginData({...loginData, password: e.target.value})}
-            required
-          />
-          <button type="submit">Login</button>
-        </form>
-        
-        <p>
-          Don't have an account? 
-          <button 
-            onClick={() => setCurrentView('register')} 
-            className="link-btn"
-          >
-            Register here
+          
+          <div className="logo">
+            Croissant
+          </div>
+          <h1>Welcome Back</h1>
+          <p className="info">Sign in with your master email address and access code</p>
+          
+          <button onClick={testLogin} className="test-btn">
+            🧪 Quick Test Login
           </button>
-        </p>
-        
-        {message && <p className="message">{message}</p>}
+          
+          {!isTauri && (
+            <div className="demo-info">
+              <h4>Demo Credentials:</h4>
+              <p><strong>Admin:</strong> admin@croissant.dev / admin123</p>
+              <p><strong>Test:</strong> test@example.com / test123</p>
+            </div>
+          )}
+          
+          <form onSubmit={handleLogin} className="auth-form fade-in">
+            <div className="form-group">
+              <label>Master Email Address</label>
+              <input
+                type="email"
+                placeholder="Enter your email address"
+                value={loginData.email}
+                onChange={(e) => setLoginData({...loginData, email: e.target.value})}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label>Access Code</label>
+              <input
+                type="password"
+                placeholder="Enter your access code"
+                value={loginData.password}
+                onChange={(e) => setLoginData({...loginData, password: e.target.value})}
+                required
+              />
+            </div>
+            <button type="submit">Sign In</button>
+          </form>
+          
+          <p>
+            Don't have an account? 
+            <button 
+              onClick={() => setCurrentView('register')} 
+              className="link-btn"
+            >
+              Create account
+            </button>
+          </p>
+          
+          {message && <div className={`message ${message.includes('✅') ? 'success' : 'error'}`}>{message}</div>}
+        </div>
       </div>
     );
   }
@@ -251,55 +385,205 @@ function App() {
 
   return (
     <div className="container">
-      <h1>Croissant Dashboard</h1>
-      <button 
-        onClick={() => setCurrentView('login')} 
-        className="logout-btn"
-      >
-        Logout
-      </button>
-      
-      <div className="section">
-        <h2>Add New User</h2>
-        <form onSubmit={addUser} className="user-form">
-          <input
-            type="text"
-            placeholder="Name"
-            value={newUser.name}
-            onChange={(e) => setNewUser({...newUser, name: e.target.value})}
-            required
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            value={newUser.email}
-            onChange={(e) => setNewUser({...newUser, email: e.target.value})}
-            required
-          />
-          <button type="submit">Add User</button>
-        </form>
+      <div className={`environment-info ${isTauri ? 'tauri' : 'browser'}`}>
+        {getEnvironmentInfo()}
+        {!isTauri && ' - Persistent data enabled'}
       </div>
+      
+      <h1>Dashboard</h1>
+      <div className="nav-buttons">
+        <button 
+          onClick={() => setCurrentView('messages')} 
+          className="nav-btn"
+        >
+          📝 Messages
+        </button>
+        {!isTauri && (
+          <button 
+            onClick={clearMockData} 
+            className="nav-btn"
+            style={{backgroundColor: 'var(--error-color)'}}
+          >
+            🗑️ Clear Data
+          </button>
+        )}
+        <button 
+          onClick={() => setCurrentView('login')} 
+          className="logout-btn"
+        >
+          🚪 Logout
+        </button>
+      </div>
+      
+      <div className="dashboard-grid">
+        <div className="card">
+          <div className="card-header">
+            <h3>👤 Add New User</h3>
+          </div>
+          <div className="card-body">
+            <form onSubmit={addUser} className="user-form">
+              <div className="form-group">
+                <label>Full Name</label>
+                <input
+                  type="text"
+                  placeholder="Enter full name"
+                  value={newUser.name}
+                  onChange={(e) => setNewUser({...newUser, name: e.target.value})}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Email Address</label>
+                <input
+                  type="email"
+                  placeholder="Enter email address"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+                  required
+                />
+              </div>
+              <button type="submit">➕ Add User</button>
+            </form>
+          </div>
+        </div>
 
-      <div className="section">
-        <h2>Users ({users.length})</h2>
-        <div className="users-list">
-          {users.map(user => (
-            <div key={user.id} className="user-item">
-              <span><strong>{user.name}</strong> - {user.email}</span>
-              <button 
-                onClick={() => deleteUser(user.id)}
-                className="delete-btn"
-              >
-                Delete
-              </button>
-            </div>
-          ))}
+        <div className="card">
+          <div className="card-header">
+            <h3>👥 Users <span className="stats-counter">{users.length}</span></h3>
+          </div>
+          <div className="card-body">
+            {users.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-icon">👤</div>
+                <p>No users yet. Add your first user above.</p>
+              </div>
+            ) : (
+              <div className="users-list">
+                {users.map(user => (
+                  <div key={user.id} className="user-item">
+                    <div>
+                      <strong>{user.name}</strong>
+                      <br />
+                      <span style={{color: 'var(--text-secondary)', fontSize: '0.875rem'}}>{user.email}</span>
+                    </div>
+                    <button 
+                      onClick={() => deleteUser(user.id)}
+                      className="delete-btn"
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
       
-      {message && <p className="message">{message}</p>}
+      {message && <div className={`message ${message.includes('✅') ? 'success' : 'error'}`}>{message}</div>}
     </div>
   );
+
+  if (currentView === 'messages') {
+    return (
+      <div className="container">
+        <div className={`environment-info ${isTauri ? 'tauri' : 'browser'}`}>
+          {getEnvironmentInfo()}
+          {!isTauri && ' - Using mock data for demo'}
+        </div>
+        <h1>Message Management</h1>
+        <div className="nav-buttons">
+          <button 
+            onClick={() => setCurrentView('dashboard')} 
+            className="nav-btn"
+          >
+            👥 Users
+          </button>
+          {!isTauri && (
+            <button 
+              onClick={clearMockData} 
+              className="nav-btn"
+              style={{backgroundColor: '#ff4444'}}
+            >
+              🗑️ Clear Data
+            </button>
+          )}
+          <button 
+            onClick={() => setCurrentView('login')} 
+            className="logout-btn"
+          >
+            Logout
+          </button>
+        </div>
+        
+        <div className="section">
+          <h2>Add New Message</h2>
+          <form onSubmit={addMessage} className="message-form">
+            <input
+              type="email"
+              placeholder="Master Email Address"
+              value={newMessage.master_email_address}
+              onChange={(e) => setNewMessage({...newMessage, master_email_address: e.target.value})}
+              required
+            />
+            <input
+              type="text"
+              placeholder="Department"
+              value={newMessage.department}
+              onChange={(e) => setNewMessage({...newMessage, department: e.target.value})}
+              required
+            />
+            <textarea
+              placeholder="Text"
+              value={newMessage.text}
+              onChange={(e) => setNewMessage({...newMessage, text: e.target.value})}
+              required
+              rows="3"
+            />
+            <input
+              type="text"
+              placeholder="Content Type"
+              value={newMessage.content_type}
+              onChange={(e) => setNewMessage({...newMessage, content_type: e.target.value})}
+              required
+            />
+            <button type="submit">Add Message</button>
+          </form>
+        </div>
+        
+        <div className="section">
+          <h2>Messages</h2>
+          <button onClick={loadMessages} className="load-btn">
+            🔄 Load Messages
+          </button>
+          <div className="messages-list">
+            {messages.map(msg => (
+              <div key={msg.id} className="message-item">
+                <div className="message-header">
+                  <strong>{msg.master_email_address}</strong> - {msg.department}
+                  <span className="message-date">
+                    {new Date(msg.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="message-content">
+                  <p><strong>Type:</strong> {msg.content_type}</p>
+                  <p><strong>Text:</strong> {msg.text}</p>
+                </div>
+                <button 
+                  onClick={() => deleteMessage(msg.id)} 
+                  className="delete-btn"
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        {message && <p className="message">{message}</p>}
+      </div>
+    );
+  }
 }
 
 export default App;

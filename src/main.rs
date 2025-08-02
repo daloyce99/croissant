@@ -3,6 +3,7 @@
 use std::env;
 use dotenv::dotenv;
 use tokio_postgres::NoTls;
+use chrono;
 
 // Helper function to get database connection string from environment variables
 fn get_db_connection_string() -> Result<String, String> {
@@ -180,6 +181,100 @@ async fn delete_user(id: i32) -> Result<bool, String> {
     Ok(result > 0)
 }
 
+// Message struct for the new content management system
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Message {
+    id: i32,
+    master_email_address: String,
+    department: String,
+    text: String,
+    content_type: String,
+    created_at: String,
+}
+
+#[tauri::command]
+async fn get_messages() -> Result<Vec<Message>, String> {
+    let connection_string = get_db_connection_string()?;
+    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
+        .await
+        .map_err(|e| format!("Connection error: {}", e))?;
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
+    let rows = client
+        .query("SELECT id, master_email_address, department, text, content_type, created_at FROM messages ORDER BY created_at DESC", &[])
+        .await
+        .map_err(|e| format!("Query error: {}", e))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| Message {
+            id: row.get(0),
+            master_email_address: row.get(1),
+            department: row.get(2),
+            text: row.get(3),
+            content_type: row.get(4),
+            created_at: row.get::<_, chrono::DateTime<chrono::Utc>>(5).to_string(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn add_message(master_email_address: String, department: String, text: String, content_type: String) -> Result<Message, String> {
+    let connection_string = get_db_connection_string()?;
+    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
+        .await
+        .map_err(|e| format!("Connection error: {}", e))?;
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
+    let row = client
+        .query_one(
+            "INSERT INTO messages (master_email_address, department, text, content_type) VALUES ($1, $2, $3, $4) RETURNING id, master_email_address, department, text, content_type, created_at",
+            &[&master_email_address, &department, &text, &content_type],
+        )
+        .await
+        .map_err(|e| format!("Insert error: {}", e))?;
+
+    Ok(Message {
+        id: row.get(0),
+        master_email_address: row.get(1),
+        department: row.get(2),
+        text: row.get(3),
+        content_type: row.get(4),
+        created_at: row.get::<_, chrono::DateTime<chrono::Utc>>(5).to_string(),
+    })
+}
+
+#[tauri::command]
+async fn delete_message(id: i32) -> Result<bool, String> {
+    let connection_string = get_db_connection_string()?;
+    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
+        .await
+        .map_err(|e| format!("Connection error: {}", e))?;
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
+    let result = client
+        .execute("DELETE FROM messages WHERE id = $1", &[&id])
+        .await
+        .map_err(|e| format!("Delete error: {}", e))?;
+
+    Ok(result > 0)
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Config {
     demo: bool,
@@ -208,7 +303,10 @@ fn main() {
             check_login,
             register_user,
             get_config,
-            my_custom_command
+            my_custom_command,
+            get_messages,
+            add_message,
+            delete_message
         ])
         .setup(|_app| {
             // No get_window; avoid the issue entirely
