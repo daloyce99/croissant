@@ -1,27 +1,83 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
-// Check if we're running in Tauri
-const isTauri = window.__TAURI__ !== undefined;
+// Check if running in Tauri or browser
+const isTauri = typeof window !== 'undefined' && window.__TAURI__;
 
-// Persistent storage helpers for browser mode
-const STORAGE_KEYS = {
-  USERS: 'croissant_mock_users',
-  CREDENTIALS: 'croissant_mock_credentials',
-  MESSAGES: 'croissant_mock_messages'
-};
-
-const loadFromStorage = (key, defaultValue) => {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : defaultValue;
-  }
-  return defaultValue;
-};
-
-const saveToStorage = (key, data) => {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    localStorage.setItem(key, JSON.stringify(data));
+// API invoke function for browser mode - uses Express API server
+const apiInvoke = async (command, args = {}) => {
+  console.log(`API invoke: ${command}`, args);
+  
+  const API_BASE = 'http://localhost:3001/api';
+  
+  try {
+    switch (command) {
+      case 'check_login':
+        const loginResponse = await fetch(`${API_BASE}/check_login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args)
+        });
+        return await loginResponse.json();
+        
+      case 'register_user':
+        const registerResponse = await fetch(`${API_BASE}/register_user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args)
+        });
+        if (!registerResponse.ok) {
+          const error = await registerResponse.json();
+          throw new Error(error.error);
+        }
+        return await registerResponse.json();
+        
+      case 'get_users':
+        const usersResponse = await fetch(`${API_BASE}/get_users`);
+        return await usersResponse.json();
+        
+      case 'add_user':
+        const addUserResponse = await fetch(`${API_BASE}/add_user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args)
+        });
+        return await addUserResponse.json();
+        
+      case 'delete_user':
+        const deleteUserResponse = await fetch(`${API_BASE}/delete_user`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args)
+        });
+        return await deleteUserResponse.json();
+        
+      case 'get_messages':
+        const messagesResponse = await fetch(`${API_BASE}/get_messages`);
+        return await messagesResponse.json();
+        
+      case 'add_message':
+        const addMessageResponse = await fetch(`${API_BASE}/add_message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args)
+        });
+        return await addMessageResponse.json();
+        
+      case 'delete_message':
+        const deleteMessageResponse = await fetch(`${API_BASE}/delete_message`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args)
+        });
+        return await deleteMessageResponse.json();
+        
+      default:
+        throw new Error(`Unknown command: ${command}`);
+    }
+  } catch (error) {
+    console.error(`API Error for ${command}:`, error);
+    throw error;
   }
 };
 
@@ -56,79 +112,8 @@ const mockMessages = loadFromStorage(STORAGE_KEYS.MESSAGES, [
 ]);
 
 // Mock invoke function for browser mode
-const mockInvoke = async (command, args = {}) => {
-  console.log(`Mock invoke: ${command}`, args);
-  
-  switch (command) {
-    case 'check_login':
-      const { email, password } = args;
-      const loginCredentials = loadFromStorage(STORAGE_KEYS.CREDENTIALS, mockCredentials);
-      const user = loginCredentials.find(u => u.master_email === email && u.access_code === password);
-      return !!user;
-      
-    case 'register_user':
-      const { email: regEmail, password: regPassword } = args;
-      const registerCredentials = loadFromStorage(STORAGE_KEYS.CREDENTIALS, mockCredentials);
-      // Check if user already exists
-      if (registerCredentials.find(u => u.master_email === regEmail)) {
-        throw new Error('User already exists');
-      }
-      const newCredentials = [...registerCredentials, { master_email: regEmail, access_code: regPassword }];
-      saveToStorage(STORAGE_KEYS.CREDENTIALS, newCredentials);
-      return true;
-      
-    case 'get_users':
-      return loadFromStorage(STORAGE_KEYS.USERS, mockUsers);
-      
-    case 'add_user':
-      const { name, email: userEmail } = args;
-      const addUsers = loadFromStorage(STORAGE_KEYS.USERS, mockUsers);
-      const newId = Math.max(...addUsers.map(u => u.id), 0) + 1;
-      const newUser = { id: newId, name, email: userEmail };
-      const updatedUsers = [...addUsers, newUser];
-      saveToStorage(STORAGE_KEYS.USERS, updatedUsers);
-      return newUser;
-      
-    case 'delete_user':
-      const { id } = args;
-      const deleteUsers = loadFromStorage(STORAGE_KEYS.USERS, mockUsers);
-      const filteredUsers = deleteUsers.filter(u => u.id !== id);
-      saveToStorage(STORAGE_KEYS.USERS, filteredUsers);
-      return true;
-      
-    case 'get_messages':
-      return loadFromStorage(STORAGE_KEYS.MESSAGES, mockMessages);
-      
-    case 'add_message':
-      const { master_email_address, department, text, content_type } = args;
-      const addMessages = loadFromStorage(STORAGE_KEYS.MESSAGES, mockMessages);
-      const newMessageId = Math.max(...addMessages.map(m => m.id), 0) + 1;
-      const newMessage = { 
-        id: newMessageId, 
-        master_email_address, 
-        department, 
-        text, 
-        content_type,
-        created_at: new Date().toISOString()
-      };
-      const updatedMessages = [...addMessages, newMessage];
-      saveToStorage(STORAGE_KEYS.MESSAGES, updatedMessages);
-      return newMessage;
-      
-    case 'delete_message':
-      const { id: messageId } = args;
-      const deleteMessages = loadFromStorage(STORAGE_KEYS.MESSAGES, mockMessages);
-      const filteredMessages = deleteMessages.filter(m => m.id !== messageId);
-      saveToStorage(STORAGE_KEYS.MESSAGES, filteredMessages);
-      return true;
-      
-    default:
-      throw new Error(`Unknown command: ${command}`);
-  }
-};
-
-// Use real invoke if in Tauri, otherwise use mock
-const invoke = isTauri ? window.__TAURI__.core.invoke : mockInvoke;
+// Use real invoke if in Tauri, otherwise use API server
+const invoke = isTauri ? window.__TAURI__.core.invoke : apiInvoke;
 
 function App() {
   const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'dashboard', 'messages'
@@ -144,6 +129,22 @@ function App() {
     text: '', 
     content_type: '' 
   });
+
+  // Load data when component mounts
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        const userList = await invoke('get_users');
+        setUsers(userList);
+        const messageList = await invoke('get_messages');
+        setMessages(messageList);
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+      }
+    };
+    
+    initializeData();
+  }, []);
 
   // Helper function to show environment info
   const getEnvironmentInfo = () => {
