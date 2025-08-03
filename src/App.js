@@ -2,7 +2,38 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 
 // Check if running in Tauri or browser
-const isTauri = typeof window !== 'undefined' && window.__TAURI__;
+// For development: assume Tauri mode if no browser-specific APIs are available
+const isTauri = typeof window !== 'undefined' && (
+  window.__TAURI__ || 
+  window.__TAURI_METADATA__ || 
+  window.isTauri ||
+  document.querySelector('script[src*="tauri"]') ||
+  window.location.protocol === 'tauri:' ||
+  // Additional heuristics for Tauri detection
+  (typeof window !== 'undefined' && !window.fetch) || // Tauri doesn't have fetch in some contexts
+  (typeof navigator !== 'undefined' && navigator.userAgent.includes('Tauri')) ||
+  // If we're not in a typical browser environment, assume Tauri
+  (typeof window !== 'undefined' && typeof window.chrome === 'undefined' && typeof window.safari === 'undefined')
+);
+
+// Manual override for development - set this to true to force Tauri mode
+const FORCE_TAURI_MODE = true; // Change this to false for browser testing
+
+// Override for development: if we can't detect properly, try to import Tauri dynamically
+let forceTauriMode = FORCE_TAURI_MODE;
+
+// Debug logging
+console.log('=== ENVIRONMENT DEBUG ===');
+console.log('window.__TAURI__:', typeof window !== 'undefined' ? window.__TAURI__ : 'undefined');
+console.log('window.__TAURI_METADATA__:', typeof window !== 'undefined' ? window.__TAURI_METADATA__ : 'undefined');
+console.log('window.isTauri:', typeof window !== 'undefined' ? window.isTauri : 'undefined');
+console.log('tauri script:', typeof document !== 'undefined' ? document.querySelector('script[src*="tauri"]') : 'undefined');
+console.log('protocol:', typeof window !== 'undefined' ? window.location.protocol : 'undefined');
+console.log('userAgent:', typeof navigator !== 'undefined' ? navigator.userAgent : 'undefined');
+console.log('chrome:', typeof window !== 'undefined' ? typeof window.chrome : 'undefined');
+console.log('safari:', typeof window !== 'undefined' ? typeof window.safari : 'undefined');
+console.log('isTauri result:', isTauri);
+console.log('=======================');
 
 // API invoke function for browser mode - uses Express API server
 const apiInvoke = async (command, args = {}) => {
@@ -81,40 +112,6 @@ const apiInvoke = async (command, args = {}) => {
   }
 };
 
-// Mock database with persistent storage (browser mode only)
-const mockUsers = loadFromStorage(STORAGE_KEYS.USERS, [
-  { id: 1, name: 'Admin User', email: 'admin@croissant.dev' },
-  { id: 2, name: 'Test User', email: 'test@example.com' }
-]);
-
-const mockCredentials = loadFromStorage(STORAGE_KEYS.CREDENTIALS, [
-  { master_email: 'admin@croissant.dev', access_code: 'admin123' },
-  { master_email: 'test@example.com', access_code: 'test123' }
-]);
-
-const mockMessages = loadFromStorage(STORAGE_KEYS.MESSAGES, [
-  { 
-    id: 1, 
-    master_email_address: 'admin@croissant.dev', 
-    department: 'IT', 
-    text: 'Server maintenance scheduled for tonight', 
-    content_type: 'Notification',
-    created_at: new Date().toISOString()
-  },
-  { 
-    id: 2, 
-    master_email_address: 'test@example.com', 
-    department: 'HR', 
-    text: 'New employee onboarding process', 
-    content_type: 'Information',
-    created_at: new Date(Date.now() - 86400000).toISOString()
-  }
-]);
-
-// Mock invoke function for browser mode
-// Use real invoke if in Tauri, otherwise use API server
-const invoke = isTauri ? window.__TAURI__.core.invoke : apiInvoke;
-
 function App() {
   const [currentView, setCurrentView] = useState('login'); // 'login', 'register', 'dashboard', 'messages'
   const [loginData, setLoginData] = useState({ email: '', password: '' });
@@ -123,6 +120,8 @@ function App() {
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState({ name: '', email: '' });
   const [messages, setMessages] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [tauriReady, setTauriReady] = useState(false);
   const [newMessage, setNewMessage] = useState({ 
     master_email_address: '', 
     department: '', 
@@ -130,21 +129,164 @@ function App() {
     content_type: '' 
   });
 
-  // Load data when component mounts
+  // Wait for Tauri to be ready
   useEffect(() => {
-    const initializeData = async () => {
+    // Additional runtime check for Tauri
+    const runtimeTauriCheck = () => {
+      return !!(
+        window.__TAURI__ ||
+        window.__TAURI_INTERNALS__ ||
+        window.__TAURI_METADATA__ ||
+        navigator.userAgent.includes('Tauri') ||
+        (window.chrome && window.chrome.webview)
+      );
+    };
+    
+    const actuallyTauri = runtimeTauriCheck();
+    console.log('Runtime Tauri check:', actuallyTauri);
+    console.log('Original isTauri:', isTauri);
+    
+    // Try to force Tauri mode for development
+    const attemptTauriImport = async () => {
       try {
-        const userList = await invoke('get_users');
-        setUsers(userList);
-        const messageList = await invoke('get_messages');
-        setMessages(messageList);
+        // Try to dynamically import Tauri
+        const { invoke } = await import('@tauri-apps/api/core');
+        console.log('Successfully imported Tauri core:', typeof invoke);
+        window.__TAURI_INVOKE__ = invoke;
+        forceTauriMode = true;
+        setTauriReady(true);
+        return true;
       } catch (error) {
-        console.error('Error loading initial data:', error);
+        console.log('Failed to import Tauri core:', error.message);
+        return false;
       }
     };
     
-    initializeData();
+    if (actuallyTauri || isTauri) {
+      const checkTauri = () => {
+        const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || window.__TAURI_INVOKE__;
+        if (invoke) {
+          console.log('Tauri invoke function found:', typeof invoke);
+          setTauriReady(true);
+          return true;
+        }
+        console.log('Tauri invoke not yet available, waiting...');
+        return false;
+      };
+      
+      if (!checkTauri()) {
+        // Poll for Tauri readiness
+        console.log('Starting Tauri readiness polling...');
+        const interval = setInterval(() => {
+          if (checkTauri()) {
+            clearInterval(interval);
+          }
+        }, 100);
+        
+        // Try to import Tauri after 1 second if not detected
+        setTimeout(async () => {
+          if (!tauriReady) {
+            console.log('Attempting to import Tauri dynamically...');
+            const imported = await attemptTauriImport();
+            if (!imported) {
+              clearInterval(interval);
+              console.error('Tauri failed to initialize within 10 seconds');
+              setMessage('❌ Tauri initialization failed. Try refreshing the app.');
+            }
+          }
+        }, 1000);
+        
+        // Final cleanup after 10 seconds
+        setTimeout(() => {
+          clearInterval(interval);
+          if (!tauriReady) {
+            console.error('Tauri failed to initialize within 10 seconds');
+            setMessage('❌ Tauri initialization failed. Running in browser mode.');
+            setTauriReady(true); // Allow browser mode fallback
+          }
+        }, 10000);
+      } else {
+        setTauriReady(true);
+      }
+    } else {
+      // If not detected as Tauri, try the dynamic import anyway (for dev mode)
+      console.log('Browser mode detected, but trying Tauri import anyway...');
+      attemptTauriImport().then((imported) => {
+        if (!imported) {
+          console.log('Confirmed browser mode');
+        }
+        setTauriReady(true);
+      });
+    }
   }, []);
+
+  // Create a safe invoke function that waits for Tauri
+  const safeInvoke = async (command, args = {}) => {
+    // Runtime check for Tauri
+    const runtimeTauriCheck = !!(
+      window.__TAURI__ ||
+      window.__TAURI_INTERNALS__ ||
+      window.__TAURI_METADATA__ ||
+      window.__TAURI_INVOKE__ ||
+      forceTauriMode ||
+      navigator.userAgent.includes('Tauri') ||
+      (window.chrome && window.chrome.webview)
+    );
+    
+    console.log(`safeInvoke called: ${command}`, {
+      args,
+      isTauri,
+      runtimeTauriCheck,
+      forceTauriMode,
+      tauriReady,
+      windowTauri: !!window.__TAURI__,
+      windowTauriInvoke: !!window.__TAURI_INVOKE__
+    });
+    
+    if ((isTauri || runtimeTauriCheck) && !tauriReady) {
+      throw new Error('Tauri not ready yet. Please wait...');
+    }
+    
+    if (isTauri || runtimeTauriCheck || forceTauriMode) {
+      const tauriInvoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || window.__TAURI_INVOKE__;
+      if (!tauriInvoke) {
+        console.error('Tauri invoke function not available, falling back to browser mode');
+        return await apiInvoke(command, args);
+      }
+      console.log(`Tauri invoke: ${command}`, args);
+      return await tauriInvoke(command, args);
+    } else {
+      console.log(`Browser invoke: ${command}`, args);
+      return await apiInvoke(command, args);
+    }
+  };
+
+  // Load data when component mounts - non-blocking
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        setIsLoading(true);
+        console.log('Loading initial data...');
+        const userList = await safeInvoke('get_users');
+        console.log('Users loaded:', userList);
+        setUsers(userList);
+        const messageList = await safeInvoke('get_messages');
+        console.log('Messages loaded:', messageList);
+        setMessages(messageList);
+        setMessage('✅ Data loaded successfully');
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+        setMessage(`⚠️ Could not load data: ${error.message}. You can still use the app.`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    // Don't block the render - load data asynchronously
+    if (tauriReady) {
+      setTimeout(initializeData, 100);
+    }
+  }, [tauriReady]);
 
   // Helper function to show environment info
   const getEnvironmentInfo = () => {
@@ -154,7 +296,7 @@ function App() {
   // Test login with default admin credentials
   const testLogin = async () => {
     try {
-      const result = await invoke('check_login', { 
+      const result = await safeInvoke('check_login', { 
         email: 'admin@croissant.dev', 
         password: 'admin123' 
       });
@@ -174,7 +316,7 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const result = await invoke('check_login', loginData);
+      const result = await safeInvoke('check_login', loginData);
       if (result) {
         setMessage('✅ Login successful!');
         setCurrentView('dashboard');
@@ -191,7 +333,7 @@ function App() {
   const handleRegister = async (e) => {
     e.preventDefault();
     try {
-      const result = await invoke('register_user', registerData);
+      const result = await safeInvoke('register_user', registerData);
       if (result) {
         setMessage('✅ User registered successfully!');
         setCurrentView('login');
@@ -205,7 +347,7 @@ function App() {
 
   const loadUsers = async () => {
     try {
-      const userList = await invoke('get_users');
+      const userList = await safeInvoke('get_users');
       setUsers(userList);
     } catch (error) {
       setMessage(`❌ Error loading users: ${error}`);
@@ -215,7 +357,7 @@ function App() {
   const addUser = async (e) => {
     e.preventDefault();
     try {
-      await invoke('add_user', newUser);
+      await safeInvoke('add_user', newUser);
       setMessage('✅ User added successfully!');
       setNewUser({ name: '', email: '' });
       loadUsers();
@@ -226,7 +368,7 @@ function App() {
 
   const deleteUser = async (id) => {
     try {
-      await invoke('delete_user', { id });
+      await safeInvoke('delete_user', { id });
       setMessage('✅ User deleted successfully!');
       loadUsers();
     } catch (error) {
@@ -237,7 +379,7 @@ function App() {
   // Message management functions
   const loadMessages = async () => {
     try {
-      const messageList = await invoke('get_messages');
+      const messageList = await safeInvoke('get_messages');
       setMessages(messageList);
     } catch (error) {
       setMessage(`❌ Error loading messages: ${error}`);
@@ -247,7 +389,7 @@ function App() {
   const addMessage = async (e) => {
     e.preventDefault();
     try {
-      await invoke('add_message', newMessage);
+      await safeInvoke('add_message', newMessage);
       setMessage('✅ Message added successfully!');
       setNewMessage({ master_email_address: '', department: '', text: '', content_type: '' });
       loadMessages();
@@ -258,7 +400,7 @@ function App() {
 
   const deleteMessage = async (id) => {
     try {
-      await invoke('delete_message', { id });
+      await safeInvoke('delete_message', { id });
       setMessage('✅ Message deleted successfully!');
       loadMessages();
     } catch (error) {
